@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+	<head>
+		<title>Hoyoverse Data Asset Test</title>
+		<link rel="stylesheet" href="res/css/pico.min.css" type="text/css">
+	</head>
+	<body>
+	  <header class="container">
+	    <hgroup>
+	    	<h1>Hoyoverse Web Event Data Test</h1>
+	    	<p>A helper to get assets (namely images and their associated JSON spine data) from Hoyoverse web events.</p>
+	    </hgroup>
+	    <hr />
+	  </header>
+		<main class="container" id="content">
+			<p>Enter a act.hoyoverse.com URL <small><i>(prefilled with "A Dream Come True at Last" from ZZZ)</i></small></p>
+			<form id="url-form">
+			  <fieldset role="group">
+  				<input type="text" id="url-input" placeholder="Enter URL" value="https://act.hoyoverse.com/zzz/event/e20250124year-z2p5y6/index.html"/>
+  				<input type="submit" value="Input">
+  				<button id="clear" type="button" data-tooltip="Deletes the iFrame (and any loaded pages)">Clear</button>
+				</fieldset>
+			</form>
+			<hr />
+			<small id="status" style='margin: 1em 0;'></small>
+		</main>
+		<footer class="container">
+			<small>&copy; 2025 <a href="https://datenyan.gay" target="_blank">datenyan</a>. Content created and owned by HoyoLAB, miHoYo Co., Ltd., and its licensors.</small>
+		</footer>
+		<script src="https://jimmywarting.github.io/StreamSaver.js/StreamSaver.js"></script>
+  	<script src="https://stuk.github.io/jszip/dist/jszip.min.js"></script>
+  	<script src="res/js/zzz.js"></script>
+	</body>
+</html>
