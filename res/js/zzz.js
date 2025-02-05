@@ -1,49 +1,16 @@
 // Constants and other helper functions 
 const STATUS_DIV = document.getElementById('status');
+const vueCDNs = [
+    'https://unpkg.com/vue@2.7.14/dist/vue.runtime.min.js',
+    'https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.runtime.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/vue/2.7.14/vue.runtime.min.js',
+];
 
-function updateStatus(message) {
+const updateStatus = function(message) {
     STATUS_DIV.textContent = message;
 }
 
-// Promise rate limiter implementation - keeps us from overwhelming the server
-const LimitPromise = function (max) {
-    this._max = max;
-    this._count = 0;
-    this._taskQueue = [];
-};
-
-LimitPromise.prototype.call = function (caller, ...args) {
-    return new Promise((resolve, reject) => {
-        const task = this._createTask(caller, args, resolve, reject);
-        if (this._count >= this._max) {
-            this._taskQueue.push(task);
-        } else {
-            task();
-        }
-    });
-};
-
-LimitPromise.prototype._createTask = function (caller, args, resolve, reject) {
-    return () => {
-        caller(...args)
-            .then(resolve)
-            .catch(reject)
-            .finally(() => {
-                this._count--;
-                if (this._taskQueue.length) {
-                    let task = this._taskQueue.shift();
-                    task();
-                }
-            });
-        this._count++;
-    };
-};
-
-// Initialize our promise limiter
-const limitP = new LimitPromise(128);
-
-// Utility functions for handling file paths and extensions
-function extname(url) {
+const extname = function(url) {
     if (url.indexOf('data:') === 0) {
         const mime = url.match(/data:([^;]+)/)[1];
         return mime.split('/')[1];
@@ -51,11 +18,218 @@ function extname(url) {
     return url.split('.').pop();
 }
 
-function basename(url) {
+const basename = function(url) {
     if (url.indexOf('data:') === 0) {
         return '';
     }
     return url.split('/').pop();
+}
+
+const extractSpineResources = function(modules, url = '', window = window) {
+   const topLevelModules = [];
+   const spineManifests = [];
+   const mainManifests = [];
+
+   // Find top-level modules by checking for atlas and json string markers
+   Object.keys(modules).forEach((moduleKey) => {
+       const module = modules[moduleKey];
+       const moduleText = module.toString();
+       if (moduleText.includes('atlas:') && moduleText.includes('json:')) {
+           topLevelModules.push(moduleKey);
+       }
+   });
+
+   updateStatus('Located top level modules, moving on to sub-level modules.');
+
+   // Set up custom webpack require and override defineProperty to track sub-modules
+   const webpackRequire = createWebpackRequire(modules, url);
+   const subModules = [];
+   window.Object._defineProperty = Object.defineProperty;
+   window.Object.defineProperty = (module, property, value) => {
+       if (property === '__esModule') {
+           subModules.push(module);
+       }
+       return window.Object._defineProperty(module, property, value);
+   };
+
+   const globalThis = window;
+   const loadedModules = topLevelModules.map((moduleKey) => webpackRequire(moduleKey));
+   window.Object.defineProperty = Object._defineProperty;
+
+   updateStatus('Located sub level modules, moving on to manifest extraction.');
+
+   // Validates and categorizes manifests as either spine or main manifests
+   const validateManifest = (manifest, moduleName) => {
+       const firstKey = Array.isArray(manifest) ? 0 : Object.keys(manifest)[0];
+       let value = manifest[firstKey];
+       
+       if (!value) return;
+       if (typeof value !== 'object') {
+           value = manifest;
+       }
+
+       // Check for spine manifest (contains atlas and json)
+       if (value.atlas && value.json) {
+           spineManifests.push(manifest);
+           Object.values(manifest).forEach((item) => {
+               item.module = moduleName || item.module || '';
+           });
+           return;
+       }
+
+       // Check for main manifest (contains id, src, and type)
+       if (value.id && value.src && value.type) {
+           mainManifests.push(manifest);
+           manifest.forEach((item) => {
+               item.module = moduleName || item.module || '';
+           });
+       }
+   };
+
+   // Process sub-modules to extract manifests
+   subModules.forEach((subModule) => {
+       const moduleKeys = Object.keys(subModule);
+       moduleKeys.forEach((key) => {
+           if (key.includes && key.includes('_MANIFEST')) {
+               const manifestObj = subModule[key];
+               const manifestName = key.replace('_MANIFEST', '');
+               
+               if (Array.isArray(manifestObj)) {
+                   validateManifest(manifestObj, '_' + manifestName);
+               } else if (Object.values(manifestObj)[0].atlas) {
+                   validateManifest(manifestObj, manifestName);
+               } else {
+                   Object.values(manifestObj).forEach((item) => 
+                       validateManifest(item, manifestName)
+                   );
+               }
+           }
+       });
+   });
+
+   // Remove duplicate entries from main manifest, prioritizing non-underscore modules
+   let mainManifestArray = mainManifests.reduce((acc, curr) => curr.concat(acc), []);
+   mainManifestArray = mainManifestArray.filter((item) => {
+       if (mainManifestArray.find((prev) => item.src === prev.src) && 
+           item.module.startsWith('_')) {
+           return false;
+       }
+       return true;
+   });
+
+   updateStatus('Manifest extraction complete!');
+   
+   return {
+       SPINE_MANIFEST: spineManifests.reduce((acc, curr) => Object.assign(curr, acc), {}),
+       MAIN_MANIFEST: mainManifestArray,
+   };
+}
+
+const extractStaticResources = function(modules, url) {
+   const staticFiles = [];
+
+   updateStatus('Extracting static files...');
+
+   // Extract static file URLs from module exports
+   Object.keys(modules).forEach((moduleKey) => {
+       const module = modules[moduleKey];
+       const moduleText = module.toString();
+       const exportMatch = moduleText.match(/[a-zA-Z0-9]\.exports\s?=\s?([a-zA-Z0-9]\.[a-zA-Z0-9]\s?\+)?\s?"(.*?)"/);
+
+       if (!exportMatch) return;
+
+       const fileUrl = exportMatch[2];
+       const hasConcatenation = exportMatch[1];
+
+       // Skip non-data URLs without concatenation
+       if (!fileUrl.startsWith('data:') && !hasConcatenation) {
+           return;
+       }
+
+       // Generate file ID from URL basename or module key
+       let fileId = basename(fileUrl);
+       if (fileId) {
+           const nameParts = fileId.split('.');
+           nameParts.pop(); // Remove extension
+           if (nameParts.length >= 2) {
+               nameParts.pop(); // Remove webpack hash
+           }
+           fileId = nameParts.join('.');
+       } else {
+           fileId = moduleKey.replace(/[\/\.\:\+]/g, '_');
+       }
+
+       staticFiles.push({
+           id: fileId,
+           src: fileUrl.includes('data:') ? fileUrl : new URL(fileUrl, url).toString(),
+           _module: moduleKey,
+       });
+   });
+
+    updateStatus('Static file extraction complete!');
+
+   return staticFiles;
+}
+
+const generateZip = async function(url, spineData, staticData) {
+    const zip = new JSZip();
+    const eventFolderName = (url.match(/event\/(.*?)\//) || ['', ''])[1].split('-')[0] || Date.now().toString();
+    
+    for (const i of Object.keys(spineData.SPINE_MANIFEST)) {
+        const dir = spineData.SPINE_MANIFEST[i].module || '';
+        const atlas = spineData.SPINE_MANIFEST[i].atlas;
+        zip.file(dir + '/' + i + '.atlas', atlas);
+        
+        const j = spineData.SPINE_MANIFEST[i].json;
+        if (typeof j === 'string' && j.indexOf('http') === 0) {
+            const response = await fetch(j);
+            const blob = await response.blob();
+            zip.file(dir + '/' + i + '.json', blob);
+        } else {
+            zip.file(dir + '/' + i + '.json', JSON.stringify(j, null, 4));
+        }
+    }
+
+    // Save images
+    const savedIds = new Set();
+    const fetchPromises = Object.values(spineData.MAIN_MANIFEST).map(async (e) => {
+        if (savedIds.has(e.src)) return;
+        
+        const dir = e.module || '';
+        const filename = dir + '/' + e.id + '.' + extname(e.src);
+        savedIds.add(e.src);
+        
+        const response = await fetch(e.src);
+        const blob = await response.blob();
+        zip.file(filename, blob);
+    });
+
+    // Save static resources
+    const staticPromises = staticData.map(async (e) => {
+        if (savedIds.has(e.src)) return;
+        
+        const dir = 'other_resources';
+        const filename = dir + '/' + e.id + '.' + extname(e.src);
+        savedIds.add(e.src);
+        
+        const response = await fetch(e.src);
+        const blob = await response.blob();
+        zip.file(filename, blob);
+    });
+
+    await Promise.all([...fetchPromises, ...staticPromises]);
+    
+    // Generate and download zip
+    const content = await zip.generateAsync({type: 'blob'});
+    const downloadUrl = URL.createObjectURL(content);
+    
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = fetchToZip + '.zip';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
 }
 
 // Create the custom webpack require function
@@ -63,14 +237,21 @@ function createWebpackRequire(modules, base = '') {
     const installedModules = {};
     
     function __webpack_require__(moduleId) {
+        // If the module is already loaded, there's no need to load it again
         if (installedModules[moduleId]) return installedModules[moduleId].exports;
+
+        // Create a new module and store it in the installedModules object
         var module = (installedModules[moduleId] = {
             exports: {},
             id: moduleId,
             loaded: false,
         });
+
+        // Check if the module exists in the modules object
         if (!modules[moduleId]) return '';
-        modules[moduleId].call(module.exports, module, module.exports, __webpack_require__);
+
+        let moduleFunction = modules[moduleId];
+        moduleFunction.call(module.exports, module, module.exports, __webpack_require__);
         module.loaded = true;
         return module.exports;
     }
@@ -109,46 +290,6 @@ function createWebpackRequire(modules, base = '') {
     __webpack_require__.p = base;
     return __webpack_require__;
 }
-
-// Define CDN fallback options for Vue and other critical dependencies
-const vueCDNs = [
-    'https://unpkg.com/vue@2.7.14/dist/vue.runtime.min.js',
-    'https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.runtime.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/vue/2.7.14/vue.runtime.min.js',
-];
-
-// Enhanced script loading function with retry logic
-function loadScript(src, retries = 2) {
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = src;
-        script.crossOrigin = "anonymous"; // Add CORS header for cross-origin requests
-        
-        script.onload = () => {
-            console.log(`Successfully loaded script from ${src}`);
-            resolve(script);
-        };
-        
-        script.onerror = async (error) => {
-            console.warn(`Failed to load script from ${src}`, error);
-            if (retries > 0) {
-                console.log(`Retrying... ${retries} attempts remaining`);
-                try {
-                    const result = await loadScript(src, retries - 1);
-                    resolve(result);
-                } catch (retryError) {
-                    reject(retryError);
-                }
-            } else {
-                reject(new Error(`Failed to load script after multiple attempts: ${src}`));
-            }
-        };
-        
-        document.head.appendChild(script);
-    });
-}
-
-
 
 // Enhanced iframe loading function with improved script handling
 async function loadPageInIframe(url) {
@@ -335,6 +476,8 @@ async function loadPageInIframe(url) {
 document.getElementById('url-form').addEventListener('submit', async function(event) {
     event.preventDefault();
     const url = document.getElementById('url-input').value;
+    let spineData = {};
+    let staticData = {};
     
     // Validate URL
     if (!url.startsWith('https://act.hoyoverse.com/')) {
@@ -348,6 +491,9 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
         
         // Load the page and extract data
         const { iframe, base, contentWindow } = await loadPageInIframe(url);
+        iframe.contentWindow.regeneratorRuntime = regeneratorRuntime; 
+
+        console.log(iframe.contentWindow);
         
         // Add extraction complete message
         updateStatus('Page loaded and relevant scripts injected successfully - now pending analysis.');
@@ -356,7 +502,10 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
         iframe.style.display = 'block';
 
         // Check if there are any modules in the cachedModule array
-        let modules = {};
+        let modules = {};  
+        updateStatus("Checking for modules");
+
+        // Check if there are any modules in the cachedModule array, if so, set the modules to the cachedModules
         if (iframe.contentWindow.cachedModules && iframe.contentWindow.cachedModules.length > 0) {
             modules = {
                 ...iframe.contentWindow.loadedModules,
@@ -367,44 +516,43 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
                     ...i[1],
                 };
             }
-        // If there are no modules, check if there is a webpackJsonp array
-        } else if (iframe.contentWindow.webpackJsonp_ && iframe.contentWindow.webpackJsonp_.length > 0) {
-            const webpackJsonp = iframe.contentWindow.webpackJsonp_;
-            console.log('found WebpackJsonp', webpackJsonp);
-            const vendors = webpackJsonp.find((e) => e[0].includes('vendors'));
-            if (!vendors) {
-                updateStatus('WebpackJsonp - load vendors.js failed!');
+        // If there are no modules, check if there is a webpackChunke20250124year array
+        } else if (iframe.contentWindow.webpackChunke20250124year && iframe.contentWindow.webpackChunke20250124year.length > 0) {
+            const test = iframe.contentWindow.webpackChunke20250124year;
+            console.log('found webpackChunke20250124year', test);
+            const testVendors = test[0];
+            if (!testVendors) {
+                updateStatus('webpackChunke20250124year - load vendors.js failed!');
                 return;
             }
-            const Index = webpackJsonp.find((e) => e[0].includes('index'));
-            if (!Index) {
-                updateStatus('WebpackJsonp - load index.js failed!');
+            const testIndex = test[1];
+            if (!testIndex) {
+                updateStatus('webpackChunke20250124year - load index.js failed!');
                 return;
             }
-            const Runtime = webpackJsonp.find((e) => e[0].includes('runtime'));
-            modules = { ...vendors[1], ...Index[1], ...(Runtime ? Runtime[1] : {}) };
+            const testRuntime = test[2];
+            modules = { ...testVendors[1], ...testIndex[1], ...(testRuntime ? testRuntime[1] : {}) };
         }
-        // If there are no modules or a webpackJsonp array, check if there is is any script tags in the content that link to a vendor.js or index.js file
+        // If there are no modules, error out 
         else {
-            const scripts = iframe.contentWindow.document.querySelectorAll('script');
-            const vendorScript = Array.from(scripts).find((e) => e.src.includes('vendors'));
-            if (!vendorScript) {
-                updateStatus('Scripts array - load vendors.js failed!');
-                return;
-            }
-            const indexScript = Array.from(scripts).find((e) => e.src.includes('index'));
-            if (!indexScript) {
-                updateStatus('Scripts array - load index.js failed!');
-                return;
-            }
-            const runtimeScript = Array.from(scripts).find((e) => e.src.includes('runtime'));
-            modules = {
-                vendors: vendorScript.src,
-                index: indexScript.src,
-                runtime: runtimeScript ? runtimeScript.src : null
-            };
+            updateStatus('No modules found in the page!');
+            return;
         }
-        console.log('Modules ', modules);
+        updateStatus("Modules located (or at least didn't error out), moving on.");
+
+        // Try get the spine and static data
+        try {
+            spineData = extractSpineResources(modules, base, contentWindow);
+            staticData = extractStaticResources(modules, base, contentWindow);
+        } catch (error) {
+            console.error('Error during data extraction:', error);
+            updateStatus('Error during data extraction. Please check the console for details.');
+            return;
+        }
+
+        // Generate the zip file
+        generateZip(url, spineData, staticData);
+
 
     } catch (error) {
         console.error('Error during page loading:', error);
@@ -412,7 +560,7 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
     }
 });
 
-// Enhanced clear button functionality
+// Clear button listener
 document.getElementById('clear').addEventListener('click', function() {
     // Remove iframes
     const iframes = document.getElementsByTagName('iframe');
