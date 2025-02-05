@@ -171,64 +171,104 @@ const extractStaticResources = function(modules, url) {
    return staticFiles;
 }
 
-const generateZip = async function(url, spineData, staticData) {
-    const zip = new JSZip();
-    const eventFolderName = (url.match(/event\/(.*?)\//) || ['', ''])[1].split('-')[0] || Date.now().toString();
+/**
+ * Generates a ZIP file containing spine animations and related resources
+ * @param {string} sourceUrl - Source URL containing event ID
+ * @param {Object} spineData - Object containing spine manifests and resources
+ * @param {Object} staticData - Array of static resources to include
+ */
+const generateZip = async function(sourceUrl, spineData, staticData) {
+    const zipArchive = new JSZip();
+    const eventId = extractEventId(sourceUrl);
     
-    for (const i of Object.keys(spineData.SPINE_MANIFEST)) {
-        const dir = spineData.SPINE_MANIFEST[i].module || '';
-        const atlas = spineData.SPINE_MANIFEST[i].atlas;
-        zip.file(dir + '/' + i + '.atlas', atlas);
+    await addSpineResources(zipArchive, spineData.SPINE_MANIFEST);
+    const processedUrls = await addMainResources(zipArchive, spineData.MAIN_MANIFEST);
+    await addStaticResources(zipArchive, staticData, processedUrls);
+    
+    await downloadZipFile(zipArchive, eventId);
+};
+
+/**
+ * Extracts event ID from URL or uses timestamp
+ */
+const extractEventId = (sourceUrl) => {
+    return (sourceUrl.match(/event\/(.*?)\//) || ['', ''])[1].split('-')[0] || Date.now().toString();
+};
+
+/**
+ * Adds spine animations and their associated files to the ZIP
+ */
+async function addSpineResources(zipArchive, spineManifest) {
+    for (const resourceId of Object.keys(spineManifest)) {
+        const resourceData = spineManifest[resourceId];
+        const resourceDir = resourceData.module || '';
         
-        const j = spineData.SPINE_MANIFEST[i].json;
-        if (typeof j === 'string' && j.indexOf('http') === 0) {
-            const response = await fetch(j);
-            const blob = await response.blob();
-            zip.file(dir + '/' + i + '.json', blob);
+        // Add atlas file
+        zipArchive.file(`${resourceDir}/${resourceId}.atlas`, resourceData.atlas);
+        
+        // Add JSON file - either fetch from URL or use provided data
+        if (typeof resourceData.json === 'string' && resourceData.json.startsWith('http')) {
+            const response = await fetch(resourceData.json);
+            const jsonBlob = await response.blob();
+            zipArchive.file(`${resourceDir}/${resourceId}.json`, jsonBlob);
         } else {
-            zip.file(dir + '/' + i + '.json', JSON.stringify(j, null, 4));
+            const formattedJson = JSON.stringify(resourceData.json, null, 4);
+            zipArchive.file(`${resourceDir}/${resourceId}.json`, formattedJson);
         }
     }
+}
 
-    // Save images
-    const savedIds = new Set();
-    const fetchPromises = Object.values(spineData.MAIN_MANIFEST).map(async (e) => {
-        if (savedIds.has(e.src)) return;
-        
-        const dir = e.module || '';
-        const filename = dir + '/' + e.id + '.' + extname(e.src);
-        savedIds.add(e.src);
-        
-        const response = await fetch(e.src);
-        const blob = await response.blob();
-        zip.file(filename, blob);
-    });
-
-    // Save static resources
-    const staticPromises = staticData.map(async (e) => {
-        if (savedIds.has(e.src)) return;
-        
-        const dir = 'other_resources';
-        const filename = dir + '/' + e.id + '.' + extname(e.src);
-        savedIds.add(e.src);
-        
-        const response = await fetch(e.src);
-        const blob = await response.blob();
-        zip.file(filename, blob);
-    });
-
-    await Promise.all([...fetchPromises, ...staticPromises]);
+/**
+ * Adds main manifest resources (typically images) to the ZIP
+ * @returns {Set} Set of processed URLs to avoid duplicates
+ */
+async function addMainResources(zipArchive, mainManifest) {
+    const processedUrls = new Set();
     
-    // Generate and download zip
-    const content = await zip.generateAsync({type: 'blob'});
-    const downloadUrl = URL.createObjectURL(content);
+    await Promise.all(Object.values(mainManifest).map(async (resource) => {
+        if (processedUrls.has(resource.src)) return;
+        
+        const resourceDir = resource.module || '';
+        const filename = `${resourceDir}/${resource.id}.${extname(resource.src)}`;
+        processedUrls.add(resource.src);
+        
+        const response = await fetch(resource.src);
+        const resourceBlob = await response.blob();
+        zipArchive.file(filename, resourceBlob);
+    }));
     
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = fetchToZip + '.zip';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return processedUrls;
+}
+
+/**
+ * Adds static resources to the ZIP, avoiding duplicates
+ */
+async function addStaticResources(zipArchive, staticData, processedUrls) {
+    await Promise.all(staticData.map(async (resource) => {
+        if (processedUrls.has(resource.src)) return;
+        
+        const filename = `other_resources/${resource.id}.${extname(resource.src)}`;
+        processedUrls.add(resource.src);
+        
+        const response = await fetch(resource.src);
+        const resourceBlob = await response.blob();
+        zipArchive.file(filename, resourceBlob);
+    }));
+}
+
+/**
+ * Generates and triggers download of the ZIP file
+ */
+async function downloadZipFile(zipArchive, eventId) {
+    const zipContent = await zipArchive.generateAsync({type: 'blob'});
+    const downloadUrl = URL.createObjectURL(zipContent);
+    
+    const downloadLink = document.createElement('a');
+    downloadLink.href = downloadUrl;
+    downloadLink.download = `${eventId}.zip`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
     URL.revokeObjectURL(downloadUrl);
 }
 
