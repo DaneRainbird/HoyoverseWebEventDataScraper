@@ -300,6 +300,8 @@ const addStaticResources = async function(zipArchive, staticData, processedUrls)
  * @returns {Promise<void>}
  */
 const downloadZipFile = async function(zipArchive, eventId) {
+    updateStatus("Download starting, please wait...");
+
     const zipContent = await zipArchive.generateAsync({type: 'blob'});
     const downloadUrl = URL.createObjectURL(zipContent);
     
@@ -639,6 +641,8 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
             updateStatus('Error during data extraction. Please check the console for details.');
             return;
         }
+
+        updateStatus("Data extraction complete, generating download. Please wait as this can take some time.")
 
         // Generate the zip file
         generateZip(url, spineData, staticData);
