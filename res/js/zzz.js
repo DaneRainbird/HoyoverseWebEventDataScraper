@@ -1,16 +1,24 @@
-// Constants and other helper functions 
 const STATUS_DIV = document.getElementById('status');
-const vueCDNs = [
+const VUE_CDNS = [
     'https://unpkg.com/vue@2.7.14/dist/vue.runtime.min.js',
     'https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.runtime.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/vue/2.7.14/vue.runtime.min.js',
 ];
 
+/**
+ * Updates the status message in the UI
+ * @param {string} message - Status message to display
+ */
 const updateStatus = function(message) {
     STATUS_DIV.textContent = message;
 }
 
-const extname = function(url) {
+/**
+ * Extracts file extension from URL or data URI
+ * @param {string} url - URL or data URI to process
+ * @returns {string} File extension
+ */
+const getExtensionName = function(url) {
     if (url.indexOf('data:') === 0) {
         const mime = url.match(/data:([^;]+)/)[1];
         return mime.split('/')[1];
@@ -18,13 +26,25 @@ const extname = function(url) {
     return url.split('.').pop();
 }
 
-const basename = function(url) {
+/**
+ * Extracts filename from URL
+ * @param {string} url - URL to process
+ * @returns {string} Filename without path
+ */
+const getBaseUrl = function(url) {
     if (url.indexOf('data:') === 0) {
         return '';
     }
     return url.split('/').pop();
 }
 
+/**
+ * Extracts spine resources from webpack modules
+ * @param {Object} modules - Webpack modules
+ * @param {string} url - Base URL
+ * @param {Window} window - Window object
+ * @returns {Object} Extracted spine and main manifests
+ */
 const extractSpineResources = function(modules, url = '', window = window) {
    const topLevelModules = [];
    const spineManifests = [];
@@ -125,6 +145,12 @@ const extractSpineResources = function(modules, url = '', window = window) {
    };
 }
 
+/**
+ * Extracts the static resources from webpack modules
+ * @param {Object} modules - Webpack modules
+ * @param {string} url - Base URL
+ * @returns {Array} Array of static file objects
+ */
 const extractStaticResources = function(modules, url) {
    const staticFiles = [];
 
@@ -146,8 +172,8 @@ const extractStaticResources = function(modules, url) {
            return;
        }
 
-       // Generate file ID from URL basename or module key
-       let fileId = basename(fileUrl);
+       // Generate file ID from URL getBaseUrl or module key
+       let fileId = getBaseUrl(fileUrl);
        if (fileId) {
            const nameParts = fileId.split('.');
            nameParts.pop(); // Remove extension
@@ -189,16 +215,21 @@ const generateZip = async function(sourceUrl, spineData, staticData) {
 };
 
 /**
- * Extracts event ID from URL or uses timestamp
+ * Extracts event ID from URL or generates timestamp
+ * @param {string} sourceUrl - Source URL
+ * @returns {string} Event ID or timestamp
  */
 const extractEventId = (sourceUrl) => {
     return (sourceUrl.match(/event\/(.*?)\//) || ['', ''])[1].split('-')[0] || Date.now().toString();
 };
 
 /**
- * Adds spine animations and their associated files to the ZIP
+ * Adds spine resources to a given ZIP archive
+ * @param {JSZip} zipArchive - ZIP archive instance
+ * @param {Object} spineManifest - Spine manifest data
+ * @returns {Promise<void>}
  */
-async function addSpineResources(zipArchive, spineManifest) {
+const addSpineResources = async function(zipArchive, spineManifest) {
     for (const resourceId of Object.keys(spineManifest)) {
         const resourceData = spineManifest[resourceId];
         const resourceDir = resourceData.module || '';
@@ -219,17 +250,19 @@ async function addSpineResources(zipArchive, spineManifest) {
 }
 
 /**
- * Adds main manifest resources (typically images) to the ZIP
- * @returns {Set} Set of processed URLs to avoid duplicates
+ * Adds main manifest resources to ZIP archive
+ * @param {JSZip} zipArchive - ZIP archive instance
+ * @param {Object} mainManifest - Main manifest data
+ * @returns {Promise<Set>} Set of processed URLs
  */
-async function addMainResources(zipArchive, mainManifest) {
+const addMainResources = async function(zipArchive, mainManifest) {
     const processedUrls = new Set();
     
     await Promise.all(Object.values(mainManifest).map(async (resource) => {
         if (processedUrls.has(resource.src)) return;
         
         const resourceDir = resource.module || '';
-        const filename = `${resourceDir}/${resource.id}.${extname(resource.src)}`;
+        const filename = `${resourceDir}/${resource.id}.${getExtensionName(resource.src)}`;
         processedUrls.add(resource.src);
         
         const response = await fetch(resource.src);
@@ -241,13 +274,17 @@ async function addMainResources(zipArchive, mainManifest) {
 }
 
 /**
- * Adds static resources to the ZIP, avoiding duplicates
+ * Adds static resources to ZIP archive
+ * @param {JSZip} zipArchive - ZIP archive instance
+ * @param {Array} staticData - Static resource data
+ * @param {Set} processedUrls - Set of already processed URLs
+ * @returns {Promise<void>}
  */
-async function addStaticResources(zipArchive, staticData, processedUrls) {
+const addStaticResources = async function(zipArchive, staticData, processedUrls) {
     await Promise.all(staticData.map(async (resource) => {
         if (processedUrls.has(resource.src)) return;
         
-        const filename = `other_resources/${resource.id}.${extname(resource.src)}`;
+        const filename = `other_resources/${resource.id}.${getExtensionName(resource.src)}`;
         processedUrls.add(resource.src);
         
         const response = await fetch(resource.src);
@@ -257,9 +294,12 @@ async function addStaticResources(zipArchive, staticData, processedUrls) {
 }
 
 /**
- * Generates and triggers download of the ZIP file
+ * Generates and triggers download of ZIP file
+ * @param {JSZip} zipArchive - ZIP archive instance
+ * @param {string} eventId - Event identifier
+ * @returns {Promise<void>}
  */
-async function downloadZipFile(zipArchive, eventId) {
+const downloadZipFile = async function(zipArchive, eventId) {
     const zipContent = await zipArchive.generateAsync({type: 'blob'});
     const downloadUrl = URL.createObjectURL(zipContent);
     
@@ -272,8 +312,13 @@ async function downloadZipFile(zipArchive, eventId) {
     URL.revokeObjectURL(downloadUrl);
 }
 
-// Create the custom webpack require function
-function createWebpackRequire(modules, base = '') {
+/**
+ * Creates the custom webpack require function to be injected into the page
+ * @param {Object} modules - Webpack modules
+ * @param {string} base - Base URL
+ * @returns {Function} Webpack require function
+ */
+const createWebpackRequire = function(modules, base = '') {
     const installedModules = {};
     
     function __webpack_require__(moduleId) {
@@ -331,8 +376,13 @@ function createWebpackRequire(modules, base = '') {
     return __webpack_require__;
 }
 
-// Enhanced iframe loading function with improved script handling
-async function loadPageInIframe(url) {
+
+/**
+ * Loads page content in an iframe with enhanced script handling
+ * @param {string} url - URL to load
+ * @returns {Promise<Object>} Object containing iframe, base URL, and content window
+ */
+const loadPageInIframe = async function(url) {
     updateStatus('Fetching page content...');
     
     const response = await fetch(url);
@@ -370,7 +420,7 @@ async function loadPageInIframe(url) {
 
         // Modified Vue loading logic with fallbacks
         window.vueLoaded = (async function() {
-            for (const cdn of ${JSON.stringify(vueCDNs)}) {
+            for (const cdn of ${JSON.stringify(VUE_CDNS)}) {
                 try {
                     await window.loadExternalScript(cdn);
                     console.info('Vue loaded successfully from injected script');
@@ -600,7 +650,7 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
     }
 });
 
-// Clear button listener
+// Set up clear button listener
 document.getElementById('clear').addEventListener('click', function() {
     // Remove iframes
     const iframes = document.getElementsByTagName('iframe');
