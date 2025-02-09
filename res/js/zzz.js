@@ -572,8 +572,8 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
     let staticData = {};
     
     // Validate URL
-    if (!url.startsWith('https://act.hoyoverse.com/')) {
-        alert('Please enter a valid act.hoyoverse.com URL.');
+    if (!url.startsWith('https://act.hoyoverse.com/') && !url.startsWith('https://webstatic-sea.mihoyo.com/')) {
+        updateStatus('Invalid URL. Please provide a valid event URL (i.e. starting with act.hoyoverse.com or webstatic-sea.mihoyo.com)');
         return;
     }
 

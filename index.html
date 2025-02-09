@@ -1,23 +1,23 @@
 <!DOCTYPE html>
 	<head>
-		<title>Hoyoverse Data Asset Test</title>
+		<title>Hoyoverse Web Event Data Scraper</title>
 		<link rel="stylesheet" href="res/css/pico.min.css" type="text/css">
 	</head>
 	<body>
 	  <header class="container">
 	    <hgroup>
-	    	<h1>Hoyoverse Web Event Data Test</h1>
+	    	<h1>Hoyoverse Web Event Data Scraper</h1>
 	    	<p>A helper to get assets (namely images and their associated JSON spine data) from Hoyoverse web events.</p>
 	    </hgroup>
 	    <hr />
 	  </header>
 		<main class="container" id="content">
-			<p>Enter a act.hoyoverse.com URL <small><i>(prefilled with "A Dream Come True at Last" from ZZZ)</i></small></p>
+			<p>Enter a <kbd>act.hoyoverse.com</kbd> or <kbd>webstatic-sea.mihoyo.com</kbd> URL <small><i>(prefilled with "A Dream Come True at Last" from ZZZ)</i></small></p>
 			<form id="url-form">
 			  <fieldset role="group">
   				<input type="text" id="url-input" placeholder="Enter URL" value="https://act.hoyoverse.com/zzz/event/e20250124year-z2p5y6/index.html"/>
   				<input type="submit" value="Input">
-  				<button id="clear" type="button" data-tooltip="Deletes the iFrame (and any loaded pages)">Clear</button>
+  				<button class="secondary" id="clear" type="button" data-tooltip="Deletes the iFrame (and any loaded pages)">Clear</button>
 				</fieldset>
 			</form>
 			<hr />
