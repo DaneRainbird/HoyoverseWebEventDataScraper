@@ -580,6 +580,15 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
     try {
         // Clear any existing iframes
         document.getElementById('clear').click();
+
+        // Extract the name of the event from the URL
+        const EVENT_MATCH = url.match(/\/e(\d+[a-zA-Z]+)(?:-|\/)/);
+        if (!EVENT_MATCH) {
+            alert('Failed to extract event ID from URL. Please check the URL and try again.');
+            return;
+        }
+        const EVENT_NAME = EVENT_MATCH[1];
+        const WEBPACK_CHUNK_NAME = `webpackChunk${EVENT_NAME}`;
         
         // Load the page and extract data
         const { iframe, base, contentWindow } = await loadPageInIframe(url);
@@ -608,29 +617,49 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
                     ...i[1],
                 };
             }
-        // If there are no modules, check if there is a webpackChunke20250124year array
-        } else if (iframe.contentWindow.webpackChunke20250124year && iframe.contentWindow.webpackChunke20250124year.length > 0) {
-            const test = iframe.contentWindow.webpackChunke20250124year;
-            console.log('found webpackChunke20250124year', test);
-            const testVendors = test[0];
+            updateStatus("Modules located in page's cached modules, moving on.");
+
+        // If there are no modules, check if there is a relevant webpack array (i.e. webpackChunk<eventname>)
+        } else {
+            // Create a function to safely check and access the webpack chunk
+            const getWebpackChunk = () => {
+                // Get all properties of the contentWindow
+                const props = Object.getOwnPropertyNames(iframe.contentWindow);
+                // Find the property that starts with 'webpackChunk' and contains our event name
+                const webpackProp = props.find(prop => 
+                    prop.startsWith('webpackChunk') && prop.includes(EVENT_NAME)
+                );
+                return webpackProp ? iframe.contentWindow[webpackProp] : null;
+            };
+
+            const webpackChunk = getWebpackChunk();
+
+            if (!webpackChunk || !webpackChunk.length) {
+                updateStatus('No modules found in the provided page!');
+                return;
+            }
+
+            const [testVendors, testIndex, testRuntime] = webpackChunk;
+
+            // Ensure that the webpack chunk contains the necessary modules
             if (!testVendors) {
-                updateStatus('webpackChunke20250124year - load vendors.js failed!');
+                updateStatus('webpack chunk - load vendors.js failed!');
                 return;
             }
-            const testIndex = test[1];
+
             if (!testIndex) {
-                updateStatus('webpackChunke20250124year - load index.js failed!');
+                updateStatus('webpack chunk - load index.js failed!');
                 return;
             }
-            const testRuntime = test[2];
-            modules = { ...testVendors[1], ...testIndex[1], ...(testRuntime ? testRuntime[1] : {}) };
+
+            modules = { 
+                ...testVendors[1], 
+                ...testIndex[1], 
+                ...(testRuntime ? testRuntime[1] : {}) 
+            };
+
+            updateStatus("Modules located in webpack chunk, moving on.");
         }
-        // If there are no modules, error out 
-        else {
-            updateStatus('No modules found in the page!');
-            return;
-        }
-        updateStatus("Modules located (or at least didn't error out), moving on.");
 
         // Try get the spine and static data
         try {
@@ -646,7 +675,6 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
 
         // Generate the zip file
         generateZip(url, spineData, staticData);
-
 
     } catch (error) {
         console.error('Error during page loading:', error);
