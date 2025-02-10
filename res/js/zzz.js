@@ -579,7 +579,16 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
 
     try {
         // Clear any existing iframes
-        document.getElementById('clear').click();
+        const iframes = document.getElementsByTagName('iframe');
+        while (iframes.length > 0) {
+            iframes[0].remove();
+        }
+        
+        // Remove status messages
+        updateStatus('');
+        
+        // Clear console
+        console.clear();
 
         // Extract the name of the event from the URL
         const EVENT_MATCH = url.match(/\/e(\d+[a-zA-Z]+)(?:-|\/)/);
@@ -704,19 +713,4 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
         console.error('Error during page loading:', error);
         alert('An error occurred while loading the page. Please check the console for details.');
     }
-});
-
-// Set up clear button listener
-document.getElementById('clear').addEventListener('click', function() {
-    // Remove iframes
-    const iframes = document.getElementsByTagName('iframe');
-    while (iframes.length > 0) {
-        iframes[0].remove();
-    }
-    
-    // Remove status messages
-    STATUS_DIV.textContent = '';
-    
-    // Clear console
-    console.clear();
 });
