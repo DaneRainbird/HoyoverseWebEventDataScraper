@@ -519,7 +519,7 @@ const loadPageInIframe = async function(url) {
 
     html = html.replace('<head>', `<head><base href="${base}">`);
 
-    updateStatus('Loading page in iframe...');
+    updateStatus('Loading page in iFrame...');
 
     // Create and load iframe
     const iframe = document.createElement('iframe');
@@ -619,8 +619,32 @@ document.getElementById('url-form').addEventListener('submit', async function(ev
             }
             updateStatus("Modules located in page's cached modules, moving on.");
 
+        // Check if webpackJsonp array exists and has a length greater than 0
+        } else if (iframe.contentWindow.webpackJsonp && iframe.contentWindow.webpackJsonp.length > 0) {
+            const vendors = iframe.contentWindow.webpackJsonp.find((e) => e[0].includes('vendors'));
+            if (!vendors) {
+                updateStatus('webpackJsonp - load vendors.js failed!');
+                return;
+            }
+
+            const index = iframe.contentWindow.webpackJsonp.find((e) => e[0].includes('index'));
+            if (!index) {
+                updateStatus('webpackJsonp - load index.js failed!');
+                return;
+            }
+
+            const runtime = iframe.contentWindow.webpackJsonp.find((e) => e[0].includes('runtime'));
+            modules = { 
+                ...vendors[1], 
+                ...index[1], 
+                ...(runtime ? runtime[1] : {})
+            };
+
+            updateStatus("Modules located in page's webpackJsonp, moving on.");
+
+        } 
         // If there are no modules, check if there is a relevant webpack array (i.e. webpackChunk<eventname>)
-        } else {
+        else {
             // Create a function to safely check and access the webpack chunk
             const getWebpackChunk = () => {
                 // Get all properties of the contentWindow
